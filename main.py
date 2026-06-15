@@ -180,7 +180,8 @@ async def get_all_posts(per_page: int = Query(5, ge=1, le=20)):
     all_posts = []
     for member, raw_list in zip(MEMBERS, raw_lists):
         for raw in raw_list:
-            all_posts.append(build_post_result(member, raw))
+            if isinstance(raw, dict):
+                all_posts.append(build_post_result(member, raw))
 
     all_posts.sort(key=lambda x: x.get("date", ""), reverse=True)
 

@@ -209,6 +209,7 @@ async def get_member_posts(soop_id: str, per_page: int = Query(10, ge=1, le=20))
 
     return {
         "member": member["name"],
+        "total": len(safe_posts),
         "posts": safe_posts,
     }
 

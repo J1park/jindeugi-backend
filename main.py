@@ -36,28 +36,51 @@ HEADERS = {
     "Origin": "https://www.sooplive.co.kr",
 }
 
-# ── SOOP API HELPERS ──
+# ── HELPERS ──
 
 async def fetch_station(client: httpx.AsyncClient, soop_id: str) -> dict:
-    """BJ 스테이션 정보 (라이브 여부 포함)"""
     try:
-        url = f"https://bjapi.sooplive.co.kr/api/{soop_id}/station"
-        r = await client.get(url, headers=HEADERS, timeout=8)
+        r = await client.get(
+            f"https://bjapi.sooplive.co.kr/api/{soop_id}/station",
+            headers=HEADERS, timeout=8
+        )
         if r.status_code == 200:
             return r.json().get("data", {})
     except Exception:
         pass
     return {}
 
-async def fetch_posts_api(client: httpx.AsyncClient, soop_id: str, per_page: int = 5) -> list:
-    """BJ 게시판 글 목록"""
+async def fetch_posts_try(client: httpx.AsyncClient, soop_id: str, per_page: int = 5) -> list:
+    """게시글 - 여러 파라미터 조합 순차 시도"""
+    candidates = [
+        {"page": 1, "per_page": per_page, "type": "all"},
+        {"page": 1, "per_page": per_page},
+        {"page": 1, "per_page": per_page, "type": "post"},
+    ]
+    for params in candidates:
+        try:
+            r = await client.get(
+                f"https://bjapi.sooplive.co.kr/api/{soop_id}/board/post",
+                headers=HEADERS, params=params, timeout=8
+            )
+            if r.status_code == 200:
+                items = r.json().get("data", [])
+                if items:
+                    return items
+        except Exception:
+            pass
+
+    # 폴백: VOD 목록
     try:
-        url = f"https://bjapi.sooplive.co.kr/api/{soop_id}/board/post"
-        r = await client.get(url, headers=HEADERS, params={"page": 1, "per_page": per_page, "type": "post"}, timeout=8)
+        r = await client.get(
+            f"https://bjapi.sooplive.co.kr/api/{soop_id}/vods",
+            headers=HEADERS, params={"page": 1, "per_page": per_page}, timeout=8
+        )
         if r.status_code == 200:
             return r.json().get("data", [])
     except Exception:
         pass
+
     return []
 
 def build_live_result(member: dict, station_data: dict) -> dict:
@@ -68,11 +91,11 @@ def build_live_result(member: dict, station_data: dict) -> dict:
         "soopId":    member["soopId"],
         "isLive":    is_live,
         "embedUrl":  f"https://play.sooplive.co.kr/{member['soopId']}/embeded" if is_live else None,
-        "title":     broad.get("broad_title", "")         if broad else "",
-        "viewers":   broad.get("current_sum_viewer", 0)   if broad else 0,
-        "thumbnail": broad.get("broad_img", "")           if broad else "",
-        "broadNo":   broad.get("broad_no", "")            if broad else "",
-        "upCount":   broad.get("up_count", 0)             if broad else 0,
+        "title":     broad.get("broad_title", "")       if broad else "",
+        "viewers":   broad.get("current_sum_viewer", 0) if broad else 0,
+        "thumbnail": broad.get("broad_img", "")         if broad else "",
+        "broadNo":   broad.get("broad_no", "")          if broad else "",
+        "upCount":   broad.get("up_count", 0)           if broad else 0,
     }
 
 def build_post_result(member: dict, raw: dict) -> dict:
@@ -80,12 +103,13 @@ def build_post_result(member: dict, raw: dict) -> dict:
         "member":    member["name"],
         "soopId":    member["soopId"],
         "platform":  "soop",
-        "postId":    raw.get("title_no", ""),
-        "title":     raw.get("title_name", ""),
-        "content":   raw.get("contents", ""),
-        "date":      raw.get("reg_date", ""),
-        "upCount":   raw.get("up_cnt", 0),
-        "viewCount": raw.get("read_cnt", 0),
+        "postId":    str(raw.get("title_no", "")),
+        "title":     raw.get("title_name", raw.get("title", "")),
+        "content":   raw.get("contents", raw.get("content", "")),
+        "date":      raw.get("reg_date", raw.get("broad_start", "")),
+        "upCount":   raw.get("up_cnt", raw.get("up_count", 0)),
+        "viewCount": raw.get("read_cnt", raw.get("view_cnt", 0)),
+        "thumbnail": raw.get("thumb", raw.get("broad_img", "")),
         "url":       f"https://www.sooplive.co.kr/{member['soopId']}/posts/{raw.get('title_no','')}",
     }
 
@@ -94,17 +118,19 @@ def build_post_result(member: dict, raw: dict) -> dict:
 
 @app.get("/")
 async def root():
-    return {"status": "ok", "service": "진드기 CREW API", "version": "1.0", "updatedAt": datetime.now().isoformat()}
+    return {
+        "status": "ok",
+        "service": "진드기 CREW API",
+        "version": "1.2",
+        "updatedAt": datetime.now().isoformat(),
+    }
 
 @app.get("/api/live")
 async def get_all_live():
-    """모든 멤버 라이브 상태 (병렬)"""
     async with httpx.AsyncClient() as client:
         stations = await asyncio.gather(*[fetch_station(client, m["soopId"]) for m in MEMBERS])
-
     results = [build_live_result(m, s) for m, s in zip(MEMBERS, stations)]
     live = [r for r in results if r["isLive"]]
-
     return {
         "updatedAt": datetime.now().isoformat(),
         "liveCount": len(live),
@@ -113,27 +139,22 @@ async def get_all_live():
 
 @app.get("/api/live/{soop_id}")
 async def get_live(soop_id: str):
-    """특정 멤버 라이브 상태"""
     member = next((m for m in MEMBERS if m["soopId"] == soop_id), None)
     if not member:
-        return {"error": "member not found", "soopId": soop_id}
+        return {"error": "member not found"}
     async with httpx.AsyncClient() as client:
         station = await fetch_station(client, soop_id)
     return build_live_result(member, station)
 
 @app.get("/api/posts")
 async def get_all_posts(per_page: int = Query(5, ge=1, le=20)):
-    """모든 멤버 최신 게시글 (병렬)"""
     async with httpx.AsyncClient() as client:
-        raw_lists = await asyncio.gather(*[fetch_posts_api(client, m["soopId"], per_page) for m in MEMBERS])
-
+        raw_lists = await asyncio.gather(*[fetch_posts_try(client, m["soopId"], per_page) for m in MEMBERS])
     all_posts = []
     for member, raw_list in zip(MEMBERS, raw_lists):
         for raw in raw_list:
             all_posts.append(build_post_result(member, raw))
-
     all_posts.sort(key=lambda x: x.get("date", ""), reverse=True)
-
     return {
         "updatedAt": datetime.now().isoformat(),
         "total":     len(all_posts),
@@ -142,12 +163,11 @@ async def get_all_posts(per_page: int = Query(5, ge=1, le=20)):
 
 @app.get("/api/posts/{soop_id}")
 async def get_member_posts(soop_id: str, per_page: int = Query(10, ge=1, le=20)):
-    """특정 멤버 게시글"""
     member = next((m for m in MEMBERS if m["soopId"] == soop_id), None)
     if not member:
         return {"error": "member not found"}
     async with httpx.AsyncClient() as client:
-        raw_list = await fetch_posts_api(client, soop_id, per_page)
+        raw_list = await fetch_posts_try(client, soop_id, per_page)
     return {
         "member": member["name"],
         "posts":  [build_post_result(member, r) for r in raw_list],
@@ -155,5 +175,29 @@ async def get_member_posts(soop_id: str, per_page: int = Query(10, ge=1, le=20))
 
 @app.get("/api/members")
 async def get_members():
-    """멤버 목록"""
     return {"members": MEMBERS}
+
+@app.get("/api/debug/{soop_id}")
+async def debug_api(soop_id: str):
+    """각 엔드포인트 응답 원문 확인용"""
+    out = {}
+    async with httpx.AsyncClient() as client:
+        for label, url, params in [
+            ("station",          f"https://bjapi.sooplive.co.kr/api/{soop_id}/station",            {}),
+            ("board_type_all",   f"https://bjapi.sooplive.co.kr/api/{soop_id}/board/post",         {"page":1,"per_page":3,"type":"all"}),
+            ("board_type_post",  f"https://bjapi.sooplive.co.kr/api/{soop_id}/board/post",         {"page":1,"per_page":3,"type":"post"}),
+            ("board_no_type",    f"https://bjapi.sooplive.co.kr/api/{soop_id}/board/post",         {"page":1,"per_page":3}),
+            ("vods",             f"https://bjapi.sooplive.co.kr/api/{soop_id}/vods",               {"page":1,"per_page":3}),
+        ]:
+            try:
+                r = await client.get(url, headers=HEADERS, params=params, timeout=8)
+                body = r.json()
+                data = body.get("data", [])
+                out[label] = {
+                    "status":    r.status_code,
+                    "dataCount": len(data) if isinstance(data, list) else ("dict" if isinstance(data, dict) else 0),
+                    "sample":    str(r.text[:300]),
+                }
+            except Exception as e:
+                out[label] = {"error": str(e)}
+    return {"soopId": soop_id, "results": out}

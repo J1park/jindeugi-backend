@@ -56,31 +56,33 @@ async def fetch_station(client: httpx.AsyncClient, soop_id: str) -> dict:
     return {}
 
 async def fetch_posts_try(client: httpx.AsyncClient, soop_id: str, per_page: int = 5) -> list:
-    candidates = [
-        {"page": 1, "per_page": per_page},
-        {"page": 1, "size": per_page},
-        {"page": 1, "limit": per_page},
-    ]
+    try:
+        r = await client.get(
+            f"{SOOP_BASE}/{soop_id}/home/section/post",
+            headers=HEADERS,
+            timeout=10
+        )
 
-    for params in candidates:
-        try:
-            r = await client.get(
-                f"{SOOP_BASE}/{soop_id}/post",
-                headers=HEADERS,
-                params=params,
-                timeout=8
-            )
-            if r.status_code == 200:
-                body = r.json()
-                data = body.get("data", [])
-                if isinstance(data, dict):
-                    items = data.get("list") or data.get("items") or data.get("posts") or []
-                else:
-                    items = data
-                if items:
-                    return items
-        except Exception:
-            pass
+        if r.status_code == 200:
+            body = r.json()
+
+            if isinstance(body, dict):
+                if "data" in body:
+                    data = body["data"]
+
+                    if isinstance(data, list):
+                        return data[:per_page]
+
+                    if isinstance(data, dict):
+                        return (
+                            data.get("list")
+                            or data.get("posts")
+                            or data.get("items")
+                            or []
+                        )
+
+    except Exception as e:
+        print("POST ERROR:", e)
 
     return []
 
@@ -210,7 +212,7 @@ async def debug_api(soop_id: str):
     async with httpx.AsyncClient() as client:
         for label, url, params in [
             ("station", f"{SOOP_BASE}/{soop_id}/station", {}),
-            ("post", f"{SOOP_BASE}/{soop_id}/post", {"page": 1, "per_page": 3}),
+            ("post", f"{SOOP_BASE}/{soop_id}/home/section/post", {}),,
         ]:
             try:
                 r = await client.get(url, headers=HEADERS, params=params, timeout=8)

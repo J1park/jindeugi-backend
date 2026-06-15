@@ -55,7 +55,7 @@ async def fetch_station(client: httpx.AsyncClient, soop_id: str) -> dict:
 
     return {}
 
-async def fetch_posts_try(client: httpx.AsyncClient, soop_id: str, per_page: int = 5) -> list:
+aasync def fetch_posts_try(client: httpx.AsyncClient, soop_id: str, per_page: int = 5) -> list:
     try:
         r = await client.get(
             f"{SOOP_BASE}/{soop_id}/home/section/post",
@@ -66,20 +66,9 @@ async def fetch_posts_try(client: httpx.AsyncClient, soop_id: str, per_page: int
         if r.status_code == 200:
             body = r.json()
 
-            if isinstance(body, dict):
-                if "data" in body:
-                    data = body["data"]
+            posts = body.get("posts", [])
 
-                    if isinstance(data, list):
-                        return data[:per_page]
-
-                    if isinstance(data, dict):
-                        return (
-                            data.get("list")
-                            or data.get("posts")
-                            or data.get("items")
-                            or []
-                        )
+            return posts[:per_page]
 
     except Exception as e:
         print("POST ERROR:", e)
@@ -115,20 +104,29 @@ def build_live_result(member: dict, station_data: dict) -> dict:
     }
 
 def build_post_result(member: dict, raw: dict) -> dict:
-    post_id = raw.get("title_no", raw.get("post_no", raw.get("id", "")))
+
+    post_id = raw.get("titleNo", "")
 
     return {
         "member": member["name"],
         "soopId": member["soopId"],
         "platform": "soop",
+
         "postId": str(post_id),
-        "title": raw.get("title_name", raw.get("title", "")),
-        "content": raw.get("contents", raw.get("content", "")),
-        "date": raw.get("reg_date", raw.get("created_at", "")),
-        "upCount": raw.get("up_cnt", raw.get("up_count", 0)),
-        "viewCount": raw.get("read_cnt", raw.get("view_cnt", 0)),
-        "thumbnail": raw.get("thumb", raw.get("thumbnail", raw.get("broad_img", ""))),
-        "url": f"https://www.sooplive.com/{member['soopId']}/post/{post_id}",
+
+        "title": raw.get("titleName", ""),
+
+        "content": raw.get("content", ""),
+
+        "date": raw.get("regDate", ""),
+
+        "upCount": 0,
+
+        "viewCount": raw.get("readCnt", 0),
+
+        "thumbnail": raw.get("thumb", ""),
+
+        "url": f"https://www.sooplive.com/station/{member['soopId']}/post/{post_id}",
     }
 
 @app.get("/")

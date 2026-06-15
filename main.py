@@ -47,7 +47,8 @@ async def fetch_station(client: httpx.AsyncClient, soop_id: str) -> dict:
         )
 
         if r.status_code == 200:
-            return r.json()
+            body = r.json()
+            return body.get("data", body)
 
     except Exception as e:
         print(e)

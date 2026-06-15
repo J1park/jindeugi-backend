@@ -28,21 +28,22 @@ MEMBERS = [
     {"name": "두칠",   "soopId": "hwyjump"},
 ]
 
+SOOP_BASE = "https://api-channel.sooplive.com/v1.1/channel"
+
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0",
     "Accept": "application/json, text/plain, */*",
     "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8",
-    "Referer": "https://www.sooplive.co.kr/",
-    "Origin": "https://www.sooplive.co.kr",
+    "Referer": "https://www.sooplive.com/",
+    "Origin": "https://www.sooplive.com",
 }
-
-# ── HELPERS ──
 
 async def fetch_station(client: httpx.AsyncClient, soop_id: str) -> dict:
     try:
         r = await client.get(
-            f"https://bjapi.sooplive.co.kr/api/{soop_id}/station",
-            headers=HEADERS, timeout=8
+            f"{SOOP_BASE}/{soop_id}/station",
+            headers=HEADERS,
+            timeout=8
         )
         if r.status_code == 200:
             return r.json().get("data", {})
@@ -51,126 +52,137 @@ async def fetch_station(client: httpx.AsyncClient, soop_id: str) -> dict:
     return {}
 
 async def fetch_posts_try(client: httpx.AsyncClient, soop_id: str, per_page: int = 5) -> list:
-    """게시글 - 여러 파라미터 조합 순차 시도"""
     candidates = [
-        {"page": 1, "per_page": per_page, "type": "all"},
         {"page": 1, "per_page": per_page},
-        {"page": 1, "per_page": per_page, "type": "post"},
+        {"page": 1, "size": per_page},
+        {"page": 1, "limit": per_page},
     ]
+
     for params in candidates:
         try:
             r = await client.get(
-                f"https://bjapi.sooplive.co.kr/api/{soop_id}/board/post",
-                headers=HEADERS, params=params, timeout=8
+                f"{SOOP_BASE}/{soop_id}/post",
+                headers=HEADERS,
+                params=params,
+                timeout=8
             )
             if r.status_code == 200:
-                items = r.json().get("data", [])
+                body = r.json()
+                data = body.get("data", [])
+                if isinstance(data, dict):
+                    items = data.get("list") or data.get("items") or data.get("posts") or []
+                else:
+                    items = data
                 if items:
                     return items
         except Exception:
             pass
 
-    # 폴백: VOD 목록
-    try:
-        r = await client.get(
-            f"https://bjapi.sooplive.co.kr/api/{soop_id}/vods",
-            headers=HEADERS, params={"page": 1, "per_page": per_page}, timeout=8
-        )
-        if r.status_code == 200:
-            return r.json().get("data", [])
-    except Exception:
-        pass
-
     return []
 
 def build_live_result(member: dict, station_data: dict) -> dict:
-    broad = station_data.get("station", {}).get("broad")
+    station = station_data.get("station", station_data)
+    broad = station.get("broad") or station.get("live") or station.get("broadcast")
+
     is_live = broad is not None
+
     return {
-        "name":      member["name"],
-        "soopId":    member["soopId"],
-        "isLive":    is_live,
-        "embedUrl":  f"https://play.sooplive.co.kr/{member['soopId']}/embeded" if is_live else None,
-        "title":     broad.get("broad_title", "")       if broad else "",
-        "viewers":   broad.get("current_sum_viewer", 0) if broad else 0,
-        "thumbnail": broad.get("broad_img", "")         if broad else "",
-        "broadNo":   broad.get("broad_no", "")          if broad else "",
-        "upCount":   broad.get("up_count", 0)           if broad else 0,
+        "name": member["name"],
+        "soopId": member["soopId"],
+        "isLive": is_live,
+        "embedUrl": f"https://play.sooplive.com/{member['soopId']}/embeded" if is_live else None,
+        "title": broad.get("broad_title", broad.get("title", "")) if broad else "",
+        "viewers": broad.get("current_sum_viewer", broad.get("viewer", broad.get("viewers", 0))) if broad else 0,
+        "thumbnail": broad.get("broad_img", broad.get("thumbnail", "")) if broad else "",
+        "broadNo": str(broad.get("broad_no", broad.get("broadNo", ""))) if broad else "",
+        "upCount": broad.get("up_count", broad.get("upCount", 0)) if broad else 0,
     }
 
 def build_post_result(member: dict, raw: dict) -> dict:
+    post_id = raw.get("title_no", raw.get("post_no", raw.get("id", "")))
+
     return {
-        "member":    member["name"],
-        "soopId":    member["soopId"],
-        "platform":  "soop",
-        "postId":    str(raw.get("title_no", "")),
-        "title":     raw.get("title_name", raw.get("title", "")),
-        "content":   raw.get("contents", raw.get("content", "")),
-        "date":      raw.get("reg_date", raw.get("broad_start", "")),
-        "upCount":   raw.get("up_cnt", raw.get("up_count", 0)),
+        "member": member["name"],
+        "soopId": member["soopId"],
+        "platform": "soop",
+        "postId": str(post_id),
+        "title": raw.get("title_name", raw.get("title", "")),
+        "content": raw.get("contents", raw.get("content", "")),
+        "date": raw.get("reg_date", raw.get("created_at", "")),
+        "upCount": raw.get("up_cnt", raw.get("up_count", 0)),
         "viewCount": raw.get("read_cnt", raw.get("view_cnt", 0)),
-        "thumbnail": raw.get("thumb", raw.get("broad_img", "")),
-        "url":       f"https://www.sooplive.co.kr/{member['soopId']}/posts/{raw.get('title_no','')}",
+        "thumbnail": raw.get("thumb", raw.get("thumbnail", raw.get("broad_img", ""))),
+        "url": f"https://www.sooplive.com/{member['soopId']}/post/{post_id}",
     }
-
-
-# ── ROUTES ──
 
 @app.get("/")
 async def root():
     return {
         "status": "ok",
         "service": "진드기 CREW API",
-        "version": "1.2",
+        "version": "1.3",
         "updatedAt": datetime.now().isoformat(),
     }
 
 @app.get("/api/live")
 async def get_all_live():
     async with httpx.AsyncClient() as client:
-        stations = await asyncio.gather(*[fetch_station(client, m["soopId"]) for m in MEMBERS])
+        stations = await asyncio.gather(*[
+            fetch_station(client, m["soopId"]) for m in MEMBERS
+        ])
+
     results = [build_live_result(m, s) for m, s in zip(MEMBERS, stations)]
     live = [r for r in results if r["isLive"]]
+
     return {
         "updatedAt": datetime.now().isoformat(),
         "liveCount": len(live),
-        "members":   results,
+        "members": results,
     }
 
 @app.get("/api/live/{soop_id}")
 async def get_live(soop_id: str):
     member = next((m for m in MEMBERS if m["soopId"] == soop_id), None)
     if not member:
-        return {"error": "member not found"}
+        member = {"name": soop_id, "soopId": soop_id}
+
     async with httpx.AsyncClient() as client:
         station = await fetch_station(client, soop_id)
+
     return build_live_result(member, station)
 
 @app.get("/api/posts")
 async def get_all_posts(per_page: int = Query(5, ge=1, le=20)):
     async with httpx.AsyncClient() as client:
-        raw_lists = await asyncio.gather(*[fetch_posts_try(client, m["soopId"], per_page) for m in MEMBERS])
+        raw_lists = await asyncio.gather(*[
+            fetch_posts_try(client, m["soopId"], per_page) for m in MEMBERS
+        ])
+
     all_posts = []
     for member, raw_list in zip(MEMBERS, raw_lists):
         for raw in raw_list:
             all_posts.append(build_post_result(member, raw))
+
     all_posts.sort(key=lambda x: x.get("date", ""), reverse=True)
+
     return {
         "updatedAt": datetime.now().isoformat(),
-        "total":     len(all_posts),
-        "posts":     all_posts[:50],
+        "total": len(all_posts),
+        "posts": all_posts[:50],
     }
 
 @app.get("/api/posts/{soop_id}")
 async def get_member_posts(soop_id: str, per_page: int = Query(10, ge=1, le=20)):
     member = next((m for m in MEMBERS if m["soopId"] == soop_id), None)
     if not member:
-        return {"error": "member not found"}
+        member = {"name": soop_id, "soopId": soop_id}
+
     async with httpx.AsyncClient() as client:
         raw_list = await fetch_posts_try(client, soop_id, per_page)
+
     return {
         "member": member["name"],
-        "posts":  [build_post_result(member, r) for r in raw_list],
+        "posts": [build_post_result(member, r) for r in raw_list],
     }
 
 @app.get("/api/members")
@@ -179,25 +191,34 @@ async def get_members():
 
 @app.get("/api/debug/{soop_id}")
 async def debug_api(soop_id: str):
-    """각 엔드포인트 응답 원문 확인용"""
     out = {}
+
     async with httpx.AsyncClient() as client:
         for label, url, params in [
-            ("station",          f"https://bjapi.sooplive.co.kr/api/{soop_id}/station",            {}),
-            ("board_type_all",   f"https://bjapi.sooplive.co.kr/api/{soop_id}/board/post",         {"page":1,"per_page":3,"type":"all"}),
-            ("board_type_post",  f"https://bjapi.sooplive.co.kr/api/{soop_id}/board/post",         {"page":1,"per_page":3,"type":"post"}),
-            ("board_no_type",    f"https://bjapi.sooplive.co.kr/api/{soop_id}/board/post",         {"page":1,"per_page":3}),
-            ("vods",             f"https://bjapi.sooplive.co.kr/api/{soop_id}/vods",               {"page":1,"per_page":3}),
+            ("station", f"{SOOP_BASE}/{soop_id}/station", {}),
+            ("post", f"{SOOP_BASE}/{soop_id}/post", {"page": 1, "per_page": 3}),
         ]:
             try:
                 r = await client.get(url, headers=HEADERS, params=params, timeout=8)
-                body = r.json()
-                data = body.get("data", [])
+                text = r.text
+
+                try:
+                    body = r.json()
+                    data = body.get("data", [])
+                    data_count = len(data) if isinstance(data, list) else ("dict" if isinstance(data, dict) else 0)
+                except Exception:
+                    data_count = 0
+
                 out[label] = {
-                    "status":    r.status_code,
-                    "dataCount": len(data) if isinstance(data, list) else ("dict" if isinstance(data, dict) else 0),
-                    "sample":    str(r.text[:300]),
+                    "url": str(r.url),
+                    "status": r.status_code,
+                    "dataCount": data_count,
+                    "sample": text[:800],
                 }
             except Exception as e:
                 out[label] = {"error": str(e)}
-    return {"soopId": soop_id, "results": out}
+
+    return {
+        "soopId": soop_id,
+        "results": out,
+    }

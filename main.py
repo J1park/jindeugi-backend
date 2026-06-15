@@ -56,29 +56,31 @@ async def fetch_station(client: httpx.AsyncClient, soop_id: str) -> dict:
 
 
 async def fetch_posts_try(client: httpx.AsyncClient, soop_id: str, per_page: int = 5) -> list:
+    url = f"{SOOP_BASE}/{soop_id}/home/section/post"
+
     try:
         r = await client.get(
-            f"{SOOP_BASE}/{soop_id}/home/section/post",
+            url,
             headers=HEADERS,
-            timeout=10
+            timeout=httpx.Timeout(5.0, connect=3.0)
         )
 
-        if r.status_code == 200:
-            body = r.json()
-            posts = body.get("posts", [])
+        if r.status_code != 200:
+            print("POST STATUS ERROR:", soop_id, r.status_code, r.text[:200])
+            return []
 
-            if isinstance(posts, dict):
-                posts = posts.get("list", [])
+        body = r.json()
+        posts = body.get("posts", [])
 
-            if not isinstance(posts, list):
-                return []
+        if not isinstance(posts, list):
+            print("POST FORMAT ERROR:", soop_id, type(posts))
+            return []
 
-            return posts[:per_page]
+        return posts[:per_page]
 
     except Exception as e:
-        print("POST ERROR:", e)
-
-    return []
+        print("POST ERROR:", soop_id, str(e))
+        return []
 
 def build_live_result(member: dict, station_data: dict) -> dict:
 

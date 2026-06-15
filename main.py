@@ -45,10 +45,13 @@ async def fetch_station(client: httpx.AsyncClient, soop_id: str) -> dict:
             headers=HEADERS,
             timeout=8
         )
+
         if r.status_code == 200:
-            return r.json().get("data", {})
-    except Exception:
-        pass
+            return r.json()
+
+    except Exception as e:
+        print(e)
+
     return {}
 
 async def fetch_posts_try(client: httpx.AsyncClient, soop_id: str, per_page: int = 5) -> list:
@@ -81,21 +84,29 @@ async def fetch_posts_try(client: httpx.AsyncClient, soop_id: str, per_page: int
     return []
 
 def build_live_result(member: dict, station_data: dict) -> dict:
-    station = station_data.get("station", station_data)
-    broad = station.get("broad") or station.get("live") or station.get("broadcast")
 
-    is_live = broad is not None
+    is_live = bool(station_data.get("broadStart"))
 
     return {
         "name": member["name"],
         "soopId": member["soopId"],
         "isLive": is_live,
         "embedUrl": f"https://play.sooplive.com/{member['soopId']}/embeded" if is_live else None,
-        "title": broad.get("broad_title", broad.get("title", "")) if broad else "",
-        "viewers": broad.get("current_sum_viewer", broad.get("viewer", broad.get("viewers", 0))) if broad else 0,
-        "thumbnail": broad.get("broad_img", broad.get("thumbnail", "")) if broad else "",
-        "broadNo": str(broad.get("broad_no", broad.get("broadNo", ""))) if broad else "",
-        "upCount": broad.get("up_count", broad.get("upCount", 0)) if broad else 0,
+
+        "title": station_data.get("stationTitle", ""),
+
+        "viewers": station_data.get(
+            "totalViewCnt",
+            station_data.get("currentViewCnt", 0)
+        ),
+
+        "thumbnail": station_data.get("profileImage", ""),
+
+        "broadNo": str(
+            station_data.get("stationNo", "")
+        ),
+
+        "upCount": 0
     }
 
 def build_post_result(member: dict, raw: dict) -> dict:

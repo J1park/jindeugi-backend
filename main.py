@@ -212,7 +212,7 @@ async def debug_api(soop_id: str):
     async with httpx.AsyncClient() as client:
         for label, url, params in [
             ("station", f"{SOOP_BASE}/{soop_id}/station", {}),
-            ("post", f"{SOOP_BASE}/{soop_id}/home/section/post", {}),,
+            ("post", f"{SOOP_BASE}/{soop_id}/home/section/post", {}),
         ]:
             try:
                 r = await client.get(url, headers=HEADERS, params=params, timeout=8)

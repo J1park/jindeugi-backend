@@ -225,7 +225,7 @@ async def debug_api(soop_id: str):
                     "url": str(r.url),
                     "status": r.status_code,
                     "dataCount": data_count,
-                    "sample": text[:800],
+                    "sample": text[:3000],
                 }
             except Exception as e:
                 out[label] = {"error": str(e)}

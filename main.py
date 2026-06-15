@@ -86,7 +86,9 @@ async def fetch_posts_try(client: httpx.AsyncClient, soop_id: str, per_page: int
 
 def build_live_result(member: dict, station_data: dict) -> dict:
 
-    is_live = bool(station_data.get("broadStart"))
+    station = station_data.get("station", {})
+
+    is_live = bool(station.get("broadStart"))
 
     return {
         "name": member["name"],
@@ -94,17 +96,17 @@ def build_live_result(member: dict, station_data: dict) -> dict:
         "isLive": is_live,
         "embedUrl": f"https://play.sooplive.com/{member['soopId']}/embeded" if is_live else None,
 
-        "title": station_data.get("stationTitle", ""),
+        "title": station.get("stationTitle", ""),
 
-        "viewers": station_data.get(
-            "totalViewCnt",
-            station_data.get("currentViewCnt", 0)
+        "viewers": station.get(
+            "currentViewCnt",
+            station.get("totalViewCnt", 0)
         ),
 
-        "thumbnail": station_data.get("profileImage", ""),
+        "thumbnail": station.get("profileImage", ""),
 
         "broadNo": str(
-            station_data.get("stationNo", "")
+            station.get("stationNo", "")
         ),
 
         "upCount": 0

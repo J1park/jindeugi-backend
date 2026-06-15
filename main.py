@@ -38,6 +38,23 @@ HEADERS = {
     "Origin": "https://www.sooplive.com",
 }
 
+async def fetch_station(client: httpx.AsyncClient, soop_id: str) -> dict:
+    try:
+        r = await client.get(
+            f"{SOOP_BASE}/{soop_id}/station",
+            headers=HEADERS,
+            timeout=10
+        )
+
+        if r.status_code == 200:
+            return r.json()
+
+    except Exception as e:
+        print("STATION ERROR:", e)
+
+    return {}
+
+
 async def fetch_posts_try(client: httpx.AsyncClient, soop_id: str, per_page: int = 5) -> list:
     try:
         r = await client.get(
@@ -48,7 +65,6 @@ async def fetch_posts_try(client: httpx.AsyncClient, soop_id: str, per_page: int
 
         if r.status_code == 200:
             body = r.json()
-
             posts = body.get("posts", [])
 
             if isinstance(posts, dict):
@@ -56,26 +72,6 @@ async def fetch_posts_try(client: httpx.AsyncClient, soop_id: str, per_page: int
 
             if not isinstance(posts, list):
                 return []
-
-            return posts[:per_page]
-
-    except Exception as e:
-        print("POST ERROR:", e)
-
-    return []
-
-aasync def fetch_posts_try(client: httpx.AsyncClient, soop_id: str, per_page: int = 5) -> list:
-    try:
-        r = await client.get(
-            f"{SOOP_BASE}/{soop_id}/home/section/post",
-            headers=HEADERS,
-            timeout=10
-        )
-
-        if r.status_code == 200:
-            body = r.json()
-
-            posts = body.get("posts", [])
 
             return posts[:per_page]
 

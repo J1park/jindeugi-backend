@@ -43,97 +43,85 @@ async def fetch_station(client: httpx.AsyncClient, soop_id: str) -> dict:
         r = await client.get(
             f"{SOOP_BASE}/{soop_id}/station",
             headers=HEADERS,
-            timeout=10
+            timeout=httpx.Timeout(8.0, connect=3.0),
         )
-
         if r.status_code == 200:
             return r.json()
-
+        print("STATION STATUS ERROR:", soop_id, r.status_code, r.text[:200])
     except Exception as e:
-        print("STATION ERROR:", e)
-
+        print("STATION ERROR:", soop_id, str(e))
     return {}
 
-
 async def fetch_posts_try(client: httpx.AsyncClient, soop_id: str, per_page: int = 5) -> list:
+    """방송국 게시글 중 스트리머 본인이 쓴 글만 반환"""
     url = f"{SOOP_BASE}/{soop_id}/home/section/post"
-
     try:
         r = await client.get(
             url,
             headers=HEADERS,
-            timeout=httpx.Timeout(5.0, connect=3.0)
+            timeout=httpx.Timeout(5.0, connect=3.0),
         )
-
         if r.status_code != 200:
             print("POST STATUS ERROR:", soop_id, r.status_code, r.text[:200])
             return []
 
         body = r.json()
         posts = body.get("posts", [])
-
         if not isinstance(posts, list):
             print("POST FORMAT ERROR:", soop_id, type(posts))
             return []
 
-        return posts[:per_page]
+        # 핵심: 방송국에 방문자가 쓴 글 제외. 스트리머 본인이 쓴 글만 사용.
+        own_posts = []
+        for p in posts:
+            if not isinstance(p, dict):
+                continue
+            author_id = str(
+                p.get("userId")
+                or p.get("bjId")
+                or p.get("workerId")
+                or p.get("authorId")
+                or ""
+            ).lower()
+            if author_id == soop_id.lower():
+                own_posts.append(p)
+
+        return own_posts[:per_page]
 
     except Exception as e:
         print("POST ERROR:", soop_id, str(e))
         return []
 
 def build_live_result(member: dict, station_data: dict) -> dict:
-
-    station = station_data.get("station", {})
-
+    station = station_data.get("station", {}) if isinstance(station_data, dict) else {}
     is_live = bool(station.get("broadStart"))
-
     return {
         "name": member["name"],
         "soopId": member["soopId"],
         "isLive": is_live,
         "embedUrl": f"https://play.sooplive.com/{member['soopId']}/embeded" if is_live else None,
-
         "title": station.get("stationTitle", ""),
-
-        "viewers": station.get(
-            "currentViewCnt",
-            station.get("totalViewCnt", 0)
-        ),
-
+        "viewers": station.get("currentViewCnt", station.get("totalViewCnt", 0)),
         "thumbnail": station.get("profileImage", ""),
-
-        "broadNo": str(
-            station.get("stationNo", "")
-        ),
-
-        "upCount": 0
+        "broadNo": str(station.get("stationNo", "")),
+        "upCount": 0,
     }
 
 def build_post_result(member: dict, raw: dict) -> dict:
-
-    post_id = raw.get("titleNo", "")
-
+    post_id = raw.get("titleNo", raw.get("bbsNo", ""))
     return {
         "member": member["name"],
         "soopId": member["soopId"],
         "platform": "soop",
-
         "postId": str(post_id),
-
         "title": raw.get("titleName", ""),
-
         "content": raw.get("content", ""),
-
         "date": raw.get("regDate", ""),
-
         "upCount": 0,
-
         "viewCount": raw.get("readCnt", 0),
-
-        "thumbnail": raw.get("thumb", ""),
-
+        "thumbnail": raw.get("thumb", raw.get("fileUrl", "")),
         "url": f"https://www.sooplive.com/station/{member['soopId']}/post/{post_id}",
+        "authorId": raw.get("userId", ""),
     }
 
 @app.get("/")
@@ -141,20 +129,16 @@ async def root():
     return {
         "status": "ok",
         "service": "진드기 CREW API",
-        "version": "1.3",
+        "version": "1.4",
         "updatedAt": datetime.now().isoformat(),
     }
 
 @app.get("/api/live")
 async def get_all_live():
     async with httpx.AsyncClient() as client:
-        stations = await asyncio.gather(*[
-            fetch_station(client, m["soopId"]) for m in MEMBERS
-        ])
-
+        stations = await asyncio.gather(*[fetch_station(client, m["soopId"]) for m in MEMBERS])
     results = [build_live_result(m, s) for m, s in zip(MEMBERS, stations)]
     live = [r for r in results if r["isLive"]]
-
     return {
         "updatedAt": datetime.now().isoformat(),
         "liveCount": len(live),
@@ -166,27 +150,20 @@ async def get_live(soop_id: str):
     member = next((m for m in MEMBERS if m["soopId"] == soop_id), None)
     if not member:
         member = {"name": soop_id, "soopId": soop_id}
-
     async with httpx.AsyncClient() as client:
         station = await fetch_station(client, soop_id)
-
     return build_live_result(member, station)
 
 @app.get("/api/posts")
 async def get_all_posts(per_page: int = Query(5, ge=1, le=20)):
     async with httpx.AsyncClient() as client:
-        raw_lists = await asyncio.gather(*[
-            fetch_posts_try(client, m["soopId"], per_page) for m in MEMBERS
-        ])
-
+        raw_lists = await asyncio.gather(*[fetch_posts_try(client, m["soopId"], per_page) for m in MEMBERS])
     all_posts = []
     for member, raw_list in zip(MEMBERS, raw_lists):
         for raw in raw_list:
             if isinstance(raw, dict):
                 all_posts.append(build_post_result(member, raw))
-
     all_posts.sort(key=lambda x: x.get("date", ""), reverse=True)
-
     return {
         "updatedAt": datetime.now().isoformat(),
         "total": len(all_posts),
@@ -198,15 +175,12 @@ async def get_member_posts(soop_id: str, per_page: int = Query(10, ge=1, le=20))
     member = next((m for m in MEMBERS if m["soopId"] == soop_id), None)
     if not member:
         member = {"name": soop_id, "soopId": soop_id}
-
     async with httpx.AsyncClient() as client:
         raw_list = await fetch_posts_try(client, soop_id, per_page)
-
     safe_posts = []
     for r in raw_list:
         if isinstance(r, dict):
             safe_posts.append(build_post_result(member, r))
-
     return {
         "member": member["name"],
         "total": len(safe_posts),
@@ -220,40 +194,36 @@ async def get_members():
 @app.get("/api/debug/{soop_id}")
 async def debug_api(soop_id: str):
     out = {}
-
     async with httpx.AsyncClient() as client:
         for label, url, params in [
             ("station", f"{SOOP_BASE}/{soop_id}/station", {}),
             ("post", f"{SOOP_BASE}/{soop_id}/home/section/post", {}),
         ]:
             try:
-                r = await client.get(url, headers=HEADERS, params=params, timeout=8)
+                r = await client.get(url, headers=HEADERS, params=params, timeout=httpx.Timeout(8.0, connect=3.0))
                 text = r.text
-
                 try:
                     body = r.json()
-                    data = body.get("data", [])
-                    data_count = len(data) if isinstance(data, list) else ("dict" if isinstance(data, dict) else 0)
+                    posts = body.get("posts", []) if isinstance(body, dict) else []
+                    own_posts = [p for p in posts if isinstance(p, dict) and str(p.get("userId", "")).lower() == soop_id.lower()]
+                    data_count = len(posts) if isinstance(posts, list) else 0
+                    own_count = len(own_posts)
                 except Exception:
                     data_count = 0
-
+                    own_count = 0
                 out[label] = {
                     "url": str(r.url),
                     "status": r.status_code,
                     "dataCount": data_count,
+                    "ownPostCount": own_count,
                     "sample": text[:3000],
                 }
             except Exception as e:
                 out[label] = {"error": str(e)}
-
-    return {
-        "soopId": soop_id,
-        "results": out,
-    }
+    return {"soopId": soop_id, "results": out}
 
 @app.get("/api/test/{soop_id}")
 async def test_station(soop_id: str):
     async with httpx.AsyncClient() as client:
         data = await fetch_station(client, soop_id)
-
     return data

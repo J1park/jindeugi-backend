@@ -233,4 +233,10 @@ async def debug_api(soop_id: str):
     return {
         "soopId": soop_id,
         "results": out,
+
+    async def test_station(soop_id: str):
+        async with httpx.AsyncClient() as client:
+            data = await fetch_station(client, soop_id)
+
+        return data
     }

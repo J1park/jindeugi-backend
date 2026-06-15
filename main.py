@@ -38,22 +38,31 @@ HEADERS = {
     "Origin": "https://www.sooplive.com",
 }
 
-async def fetch_station(client: httpx.AsyncClient, soop_id: str) -> dict:
+async def fetch_posts_try(client: httpx.AsyncClient, soop_id: str, per_page: int = 5) -> list:
     try:
         r = await client.get(
-            f"{SOOP_BASE}/{soop_id}/station",
+            f"{SOOP_BASE}/{soop_id}/home/section/post",
             headers=HEADERS,
-            timeout=8
+            timeout=10
         )
 
         if r.status_code == 200:
             body = r.json()
-            return body.get("data", body)
+
+            posts = body.get("posts", [])
+
+            if isinstance(posts, dict):
+                posts = posts.get("list", [])
+
+            if not isinstance(posts, list):
+                return []
+
+            return posts[:per_page]
 
     except Exception as e:
-        print(e)
+        print("POST ERROR:", e)
 
-    return {}
+    return []
 
 aasync def fetch_posts_try(client: httpx.AsyncClient, soop_id: str, per_page: int = 5) -> list:
     try:
@@ -194,9 +203,14 @@ async def get_member_posts(soop_id: str, per_page: int = Query(10, ge=1, le=20))
     async with httpx.AsyncClient() as client:
         raw_list = await fetch_posts_try(client, soop_id, per_page)
 
+    safe_posts = []
+    for r in raw_list:
+        if isinstance(r, dict):
+            safe_posts.append(build_post_result(member, r))
+
     return {
         "member": member["name"],
-        "posts": [build_post_result(member, r) for r in raw_list],
+        "posts": safe_posts,
     }
 
 @app.get("/api/members")
